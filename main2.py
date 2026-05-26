@@ -1,4 +1,5 @@
 import os
+import random
 import json
 import numpy as np
 import random
@@ -307,7 +308,7 @@ def plot_porous_structure(field):
 
 if __name__ == "__main__":
 
-    nn = 100
+    nn = 50
     dataset_dir = "dataset_pore"
 
     max_steps = 100000
@@ -320,53 +321,66 @@ if __name__ == "__main__":
     os.makedirs(dataset_dir, exist_ok=True)
 
 
-# ====================== НАСТРОЙКИ ДИАПАЗОНА ======================
+    ## ====================== НАСТРОЙКИ ДИАПАЗОНА ======================
 
     # Лучше начинать с небольшого количества вариантов.
     # Потом можно увеличить диапазон.
-    for vol in range(10, 90, 10):
-        for cnt_pore in range(10, 5000, 20):
 
-            print(f"\nГенерация sample{sample_number}: vol={vol}, cnt_pore={cnt_pore}")
+    vols = [x for x in range(60, 90, 10)]
+    cnts_pore = [x for x in range(10, 2000, 20)]
 
-            try:
-                input_matrix, output_matrix, info = generate_porous_structure(
-                    n=nn,
-                    solid_percent=vol,
-                    num_pores=cnt_pore,
-                    max_steps=max_steps,
-                    allow_boundary_pores=allow_boundary_pores,
-                    max_failed=max_failed
-                )
+    # Создаем все возможные комбинации
+    combinations = [(vol, cnt) for vol in vols for cnt in cnts_pore]
 
-                input_path, output_path, info_path = save_sample(
-                    input_matrix=input_matrix,
-                    output_matrix=output_matrix,
-                    info=info,
-                    dataset_dir=dataset_dir,
-                    sample_number=sample_number
-                )
+    # Перемешиваем случайно
+    random.shuffle(combinations)
 
-                print(f"Сохранено:")
-                print(f"  {input_path}")
-                print(f"  {output_path}")
+    sample_number = 0  # счетчик успешных сохранений
+    last_field = None
 
-                last_field = output_matrix
-                sample_number += 1
+    for vol, cnt_pore in combinations:
+        current_num = sample_number + 1  # номер для текущего образца
+        
+        print(f"\nГенерация sample{current_num}: vol={vol}, cnt_pore={cnt_pore}")
 
-            except Exception as e:
-                print(f"Ошибка. Пропуск vol={vol}, cnt_pore={cnt_pore}")
-                print(f"Причина: {e}")
+        try:
+            input_matrix, output_matrix, info = generate_porous_structure(
+                n=nn,
+                solid_percent=vol,
+                num_pores=cnt_pore,
+                max_steps=max_steps,
+                allow_boundary_pores=allow_boundary_pores,
+                max_failed=max_failed
+            )
 
-                save_error(
-                    dataset_dir=dataset_dir,
-                    vol=vol,
-                    cnt_pore=cnt_pore,
-                    error_text=str(e)
-                )
+            input_path, output_path, info_path = save_sample(
+                input_matrix=input_matrix,
+                output_matrix=output_matrix,
+                info=info,
+                dataset_dir=dataset_dir,
+                sample_number=current_num
+            )
+
+            print(f"Сохранено:")
+            print(f"  {input_path}")
+            print(f"  {output_path}")
+
+            last_field = output_matrix
+            sample_number += 1  # увеличиваем только при успехе
+
+        except Exception as e:
+            print(f"Ошибка. Пропуск vol={vol}, cnt_pore={cnt_pore}")
+            print(f"Причина: {e}")
+
+            save_error(
+                dataset_dir=dataset_dir,
+                vol=vol,
+                cnt_pore=cnt_pore,
+                error_text=str(e)
+            )
 
     print("\nГенерация завершена.")
-    print(f"Всего успешно сохранено samples: {sample_number}")
+    print(f"Всего успешно сохранено samples: {sample_number}")  # теперь правильно
 
     if last_field is not None:
         plot_porous_structure(last_field)
