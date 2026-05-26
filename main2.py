@@ -174,6 +174,7 @@ def save_sample(input_matrix, output_matrix, info, dataset_dir, sample_number):
 
     input_matrix_path = os.path.join(sample_dir, "input_matrix.npy")
     output_matrix_path = os.path.join(sample_dir, "output_matrix.npy")
+    output_txt_path = os.path.join(sample_dir, "output_matrix.txt")
     info_path = os.path.join(sample_dir, "info.txt")
 
     # Вход для нейронки
@@ -182,6 +183,7 @@ def save_sample(input_matrix, output_matrix, info, dataset_dir, sample_number):
     # Правильный ответ для нейронки
     np.save(output_matrix_path, output_matrix.astype(np.float32))
 
+    np.savetxt(output_txt_path, output_matrix, fmt="%d")
     # Описание для человека
     with open(info_path, "w", encoding="utf-8") as f:
         f.write("SAMPLE INFO\n")
@@ -231,10 +233,13 @@ if __name__ == "__main__":
 
     os.makedirs(dataset_dir, exist_ok=True)
 
+
+# ====================== НАСТРОЙКИ ДИАПАЗОНА ======================
+
     # Лучше начинать с небольшого количества вариантов.
     # Потом можно увеличить диапазон.
-    for vol in range(10, 30, 10):
-        for cnt_pore in range(180, 201, 20):
+    for vol in range(10, 90, 10):
+        for cnt_pore in range(10, 501, 20):
 
             print(f"\nГенерация sample{sample_number}: vol={vol}, cnt_pore={cnt_pore}")
 
