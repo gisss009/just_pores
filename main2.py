@@ -2,44 +2,135 @@ import os
 import json
 import numpy as np
 import random
-from collections import deque
 import matplotlib.pyplot as plt
 
 
 # ====================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ======================
 
 def get_neighbors_4(i, j, n):
-    dirs = [(-1, 0), (1, 0), (0, -1), (0, 1)]
-    return [
-        (i + di, j + dj)
-        for di, dj in dirs
-        if 0 <= i + di < n and 0 <= j + dj < n
-    ]
+    if i > 0:
+        yield i - 1, j
+    if i + 1 < n:
+        yield i + 1, j
+    if j > 0:
+        yield i, j - 1
+    if j + 1 < n:
+        yield i, j + 1
+
+
+def is_allowed_candidate(i, j, n, allow_boundary_pores):
+    return allow_boundary_pores or not (i in (0, n - 1) or j in (0, n - 1))
+
+
+def add_frontier_from_pore(field, frontier, pore_i, pore_j, allow_boundary_pores):
+    n = field.shape[0]
+
+    for ni, nj in get_neighbors_4(pore_i, pore_j, n):
+        if field[ni, nj] == 1 and is_allowed_candidate(ni, nj, n, allow_boundary_pores):
+            frontier.add((ni, nj))
+
+
+def build_frontier(field, allow_boundary_pores):
+    frontier = set()
+
+    for pore_i, pore_j in np.argwhere(field == 0):
+        add_frontier_from_pore(field, frontier, int(pore_i), int(pore_j), allow_boundary_pores)
+
+    return frontier
 
 
 # ====================== БЫСТРАЯ ПРОВЕРКА СВЯЗНОСТИ ======================
 
 def is_solid_connected(field):
     n = field.shape[0]
-    solid_positions = np.argwhere(field == 1)
+    solid_count = int(np.count_nonzero(field))
 
-    if len(solid_positions) == 0:
+    if solid_count == 0:
         return False
 
-    start = tuple(solid_positions[0])
-    visited = set()
-    queue = deque([start])
-    visited.add(start)
+    start_i, start_j = np.argwhere(field == 1)[0]
+    visited = np.zeros(field.shape, dtype=bool)
+    stack = [(int(start_i), int(start_j))]
+    visited[start_i, start_j] = True
+    visited_count = 0
 
-    while queue:
-        i, j = queue.popleft()
+    while stack:
+        i, j = stack.pop()
+        visited_count += 1
 
         for ni, nj in get_neighbors_4(i, j, n):
-            if field[ni, nj] == 1 and (ni, nj) not in visited:
-                visited.add((ni, nj))
-                queue.append((ni, nj))
+            if field[ni, nj] == 1 and not visited[ni, nj]:
+                visited[ni, nj] = True
+                stack.append((ni, nj))
 
-    return len(visited) == len(solid_positions)
+    return visited_count == solid_count
+
+
+def are_neighbors_locally_connected(field, neighbors, removed_i, removed_j):
+    targets = set(neighbors[1:])
+    if not targets:
+        return True
+
+    min_i = max(0, removed_i - 1)
+    max_i = min(field.shape[0] - 1, removed_i + 1)
+    min_j = max(0, removed_j - 1)
+    max_j = min(field.shape[1] - 1, removed_j + 1)
+
+    stack = [neighbors[0]]
+    visited = {neighbors[0], (removed_i, removed_j)}
+
+    while stack and targets:
+        i, j = stack.pop()
+
+        for ni, nj in get_neighbors_4(i, j, field.shape[0]):
+            if ni < min_i or ni > max_i or nj < min_j or nj > max_j:
+                continue
+            if (ni, nj) in visited or field[ni, nj] == 0:
+                continue
+
+            if (ni, nj) in targets:
+                targets.remove((ni, nj))
+
+            visited.add((ni, nj))
+            stack.append((ni, nj))
+
+    return not targets
+
+
+def can_remove_solid_cell(field, i, j):
+    n = field.shape[0]
+    solid_neighbors = [
+        (ni, nj)
+        for ni, nj in get_neighbors_4(i, j, n)
+        if field[ni, nj] == 1
+    ]
+
+    if len(solid_neighbors) <= 1:
+        return True
+
+    if are_neighbors_locally_connected(field, solid_neighbors, i, j):
+        return True
+
+    targets = set(solid_neighbors[1:])
+    stack = [solid_neighbors[0]]
+    visited = np.zeros(field.shape, dtype=bool)
+    visited[i, j] = True
+    visited[solid_neighbors[0]] = True
+
+    while stack and targets:
+        ci, cj = stack.pop()
+
+        for ni, nj in get_neighbors_4(ci, cj, n):
+            if visited[ni, nj] or field[ni, nj] == 0:
+                continue
+
+            if (ni, nj) in targets:
+                targets.remove((ni, nj))
+
+            visited[ni, nj] = True
+            stack.append((ni, nj))
+
+    return not targets
 
 
 # ====================== СОЗДАНИЕ НАЧАЛЬНЫХ ПОР ======================
@@ -61,12 +152,9 @@ def create_pore_seeds(field, num_pores, min_distance=5):
         if any(abs(i - si) + abs(j - sj) < min_distance for si, sj in seeds):
             continue
 
-        field[i, j] = 0
-
-        if is_solid_connected(field):
+        if can_remove_solid_cell(field, i, j):
+            field[i, j] = 0
             seeds.append((i, j))
-        else:
-            field[i, j] = 1
 
     return seeds
 
@@ -90,7 +178,7 @@ def generate_porous_structure(
     if n <= 0:
         raise ValueError("n должен быть больше 0")
 
-    field = np.ones((n, n), dtype=int)
+    field = np.ones((n, n), dtype=np.uint8)
 
     total_cells = n * n
     target_solid = int(round(total_cells * solid_percent / 100))
@@ -107,38 +195,36 @@ def generate_porous_structure(
 
     steps = 0
     failed_attempts = 0
+    frontier = build_frontier(field, allow_boundary_pores)
+    rejected = set()
 
     while current_solid > target_solid and steps < max_steps and failed_attempts < max_failed:
         steps += 1
 
-        candidates = set()
-
-        for i in range(n):
-            for j in range(n):
-                if field[i, j] == 0:
-                    for ni, nj in get_neighbors_4(i, j, n):
-                        if field[ni, nj] == 1:
-                            if allow_boundary_pores or not (ni in (0, n - 1) or nj in (0, n - 1)):
-                                candidates.add((ni, nj))
-
-        if not candidates:
+        frontier.difference_update(rejected)
+        if not frontier:
             break
 
-        candidates = list(candidates)
-        random.shuffle(candidates)
+        attempts = min(30, len(frontier))
+        candidates = random.sample(tuple(frontier), attempts)
 
         removed = False
 
-        for i, j in candidates[:30]:
-            field[i, j] = 0
+        for i, j in candidates:
+            frontier.discard((i, j))
 
-            if is_solid_connected(field):
+            if field[i, j] == 0:
+                continue
+
+            if can_remove_solid_cell(field, i, j):
+                field[i, j] = 0
                 current_solid -= 1
                 removed = True
                 failed_attempts = 0
+                add_frontier_from_pore(field, frontier, i, j, allow_boundary_pores)
                 break
             else:
-                field[i, j] = 1
+                rejected.add((i, j))
 
         if not removed:
             failed_attempts += 1
@@ -239,7 +325,7 @@ if __name__ == "__main__":
     # Лучше начинать с небольшого количества вариантов.
     # Потом можно увеличить диапазон.
     for vol in range(10, 90, 10):
-        for cnt_pore in range(10, 501, 20):
+        for cnt_pore in range(10, 5000, 20):
 
             print(f"\nГенерация sample{sample_number}: vol={vol}, cnt_pore={cnt_pore}")
 
